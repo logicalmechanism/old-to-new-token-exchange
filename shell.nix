@@ -1,6 +1,6 @@
 { pure ? false }:
 let
-  packages = import ./.;
+  packages = import ./old-to-new;
   inherit (packages) pkgs plutus-starter;
   inherit (plutus-starter) haskell;
 

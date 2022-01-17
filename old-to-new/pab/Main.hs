@@ -26,7 +26,7 @@ import qualified Plutus.PAB.Effects.Contract.Builtin as Builtin
 import           Plutus.PAB.Simulator                (SimulatorEffectHandlers)
 import qualified Plutus.PAB.Simulator                as Simulator
 import qualified Plutus.PAB.Webserver.Server         as PAB.Server
-import           Plutus.Contracts.Game               as Game
+import           OldToNew
 import           Plutus.Trace.Emulator.Extract       (writeScriptsTo, ScriptsConfig (..), Command (..))
 import           Ledger.Index                        (ValidatorMode(..))
 
@@ -35,7 +35,7 @@ main = void $ Simulator.runSimulationWith handlers $ do
     Simulator.logString @(Builtin StarterContracts) "Starting plutus-starter PAB webserver on port 8080. Press enter to exit."
     shutdown <- PAB.Server.startServerDebug
     -- Example of spinning up a game instance on startup
-    -- void $ Simulator.activateContract (Wallet 1) GameContract
+    -- void $ Simulator.activateContract (Wallet 1) OldToNew
     -- You can add simulator actions here:
     -- Simulator.observableState
     -- etc.
@@ -55,17 +55,11 @@ main = void $ Simulator.runSimulationWith handlers $ do
 -- Read more: <https://plutus.readthedocs.io/en/latest/plutus/howtos/analysing-scripts.html>
 writeCostingScripts :: IO ()
 writeCostingScripts = do
-  let config = ScriptsConfig { scPath = "/tmp/plutus-costing-outputs/", scCommand = cmd }
-      cmd    = Scripts { unappliedValidators = FullyAppliedValidators }
-      -- Note: Here you can use any trace you wish.
-      trace  = correctGuessTrace
-  (totalSize, exBudget) <- writeScriptsTo config "game" trace def
-  putStrLn $ "Total size = " <> show totalSize
-  putStrLn $ "ExBudget = " <> show exBudget
+  putStrLn $ "ExBudget = " 
 
 
 data StarterContracts =
-    GameContract
+    OldToNew
     deriving (Eq, Ord, Show, Generic)
     deriving anyclass OpenApi.ToSchema
 
@@ -87,11 +81,11 @@ instance Pretty StarterContracts where
     pretty = viaShow
 
 instance Builtin.HasDefinitions StarterContracts where
-    getDefinitions = [GameContract]
+    getDefinitions = [OldToNew]
     getSchema =  \case
-        GameContract -> Builtin.endpointsToSchemas @Game.GameSchema
+        OldToNew -> Builtin.endpointsToSchemas @OldToNew.Schema
     getContract = \case
-        GameContract -> SomeBuiltin (Game.game @ContractError)
+        OldToNew -> SomeBuiltin (OldToNew.contract @ContractError)
 
 handlers :: SimulatorEffectHandlers (Builtin StarterContracts)
 handlers =
