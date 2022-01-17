@@ -73,14 +73,26 @@ import qualified Plutus.V1.Ledger.Value    as Value
 -------------------------------------------------------------------------------
 -- | Create the contract parameters data object.
 -------------------------------------------------------------------------------
-data ContractParams = ContractParams {}
+data ContractParams = ContractParams {} -- no need for type yet
 PlutusTx.makeLift ''ContractParams
 
 -------------------------------------------------------------------------------
 -- | Create the datum parameters data object.
 -------------------------------------------------------------------------------
 data CustomDatumType = CustomDatumType
-  {cdtPayouts   :: !Integer}
+  { cdtOldPolicy :: !CurrencySymbol
+  -- ^ The Old Policy ID
+  , cdtOldName   :: !TokenName
+  -- ^ The Old Token Name, in hex cli>1.33 
+  , cdtConvRate  :: !Integer
+  -- ^ The Converstion Rate Between The Two, usually 1
+  , cdtNewPolicy :: !CurrencySymbol
+  -- ^ The New Policy ID
+  , cdtNewName   :: !TokenName
+  -- ^ The New Token Name, in hex.
+  , cdtIssuerPKH :: !PubKeyHash
+  -- ^ The Token Issuer pkh
+  }
     deriving stock (Show, Generic)
     deriving anyclass (FromJSON, ToJSON, ToSchema)
 PlutusTx.unstableMakeIsData ''CustomDatumType
@@ -89,8 +101,8 @@ PlutusTx.makeLift ''CustomDatumType
 -------------------------------------------------------------------------------
 -- | Create the redeemer parameters data object.
 -------------------------------------------------------------------------------
-data CustomRedeemerType = CustomRedeemerType
-  {crtPayouts   :: !Integer}
+newtype CustomRedeemerType = CustomRedeemerType
+  { crtDummy :: Integer } -- no redeemer required, use dummy.
     deriving stock (Show, Generic)
     deriving anyclass (FromJSON, ToJSON, ToSchema)
 PlutusTx.unstableMakeIsData ''CustomRedeemerType
@@ -101,7 +113,35 @@ PlutusTx.makeLift ''CustomRedeemerType
 -------------------------------------------------------------------------------
 {-# INLINABLE mkValidator #-}
 mkValidator :: ContractParams -> CustomDatumType -> CustomRedeemerType -> ScriptContext -> Bool
-mkValidator cp datum redeemer context = True
+mkValidator _ datum _ context = checkTokenExchange
+  where
+    -- Get the Tx Info
+    info :: TxInfo
+    info = scriptContextTxInfo context
+
+    -- All the outputs going back to the script.
+    scriptTxOutputs  :: [TxOut]
+    scriptTxOutputs  = getContinuingOutputs context
+
+    -- Find the new datum or return the old datum
+    embeddedDatum :: [TxOut] -> CustomDatumType
+    embeddedDatum [] = datum
+    embeddedDatum (x:xs) = case txOutDatumHash x of
+      Nothing -> embeddedDatum xs
+      Just dh -> case findDatum dh info of
+        Nothing         -> datum
+        Just (Datum d)  -> case PlutusTx.fromBuiltinData d of
+          Nothing       -> datum
+          Just embedded -> embedded
+    
+    
+    -- Check for a succuessful exchange
+    checkTokenExchange :: Bool
+    checkTokenExchange = txSignedBy info issuerPKH
+
+    -- pubkeys
+    issuerPKH :: PubKeyHash
+    issuerPKH = cdtIssuerPKH datum
 
 -------------------------------------------------------------------------------
 -- | This determines the data type for Datum and Redeemer.
