@@ -48,7 +48,7 @@ import qualified Data.Maybe
 import           Prelude                   (String)
 
 import           Ledger                    hiding ( singleton )
--- import qualified Ledger.Constraints        as Constraints
+import qualified Ledger.Constraints        as Constraints
 import qualified Ledger.Typed.Scripts      as Scripts
 import qualified Ledger.CardanoWallet      as CW
 import           Playground.Contract
@@ -199,9 +199,6 @@ mkValidator _ datum redeemer context
                       outboundNewAmt :: Integer
                       outboundNewAmt = Value.valueOf outboundValue (cdtNewPolicy datum) (cdtNewName datum)
 
-                      minimumRequiredAda :: Value
-                      minimumRequiredAda = Ada.lovelaceValueOf $ Value.valueOf validatedValue Ada.adaSymbol Ada.adaToken
-
                       oldValueAmt :: Integer
                       oldValueAmt = Value.valueOf validatedValue (cdtOldPolicy datum) (cdtOldName datum)
 
@@ -213,6 +210,9 @@ mkValidator _ datum redeemer context
 
                       newTokenValue :: Integer -> Value
                       newTokenValue amt = Value.singleton (cdtNewPolicy datum) (cdtNewName datum) amt
+                      
+                      minimumRequiredAda :: Value
+                      minimumRequiredAda = Ada.lovelaceValueOf $ Value.valueOf validatedValue Ada.adaSymbol Ada.adaToken
 
       -- pubkeys
       issuerPKH :: PubKeyHash
@@ -224,7 +224,7 @@ mkValidator _ datum redeemer context
       -------------------------------------------------------------------------
       -- | Check Some Condition Functions Here
       -------------------------------------------------------------------------
-      -- | Search each TxOut for the correct address and value.
+      -- | Search each TxOut for the value.
       checkContTxOutForValue :: [TxOut] -> Value -> Bool
       checkContTxOutForValue [] _val = False
       checkContTxOutForValue (x:xs) val
@@ -301,9 +301,25 @@ oldToNewScript = PlutusScriptSerialised oldToNewScriptShortBs
 -------------------------------------------------------------------------------
 -- | Off Chain
 -------------------------------------------------------------------------------
-
+-- The value being sold must be passed into the off chain data object.
+data ExchangeDataType = ExchangeDataType 
+  { edtOldPolicy :: !CurrencySymbol
+  -- ^ The Old Policy ID
+  , edtOldName   :: !TokenName
+  -- ^ The Old Token Name, in hex cli>1.33 
+  , edtNewPolicy :: !CurrencySymbol
+  -- ^ The New Policy ID
+  , edtNewName   :: !TokenName
+  -- ^ The New Token Name, in hex.
+  , edtMultiply  :: !Integer
+  -- ^ The token multiplier for the exchange.
+  , edtNewTotal  :: !Integer
+  -- ^ The token multiplier for the exchange.
+  }
+    deriving stock (Show, Generic)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
 type Schema =
-  Endpoint "startExchange"  CustomDatumType .\/
+  Endpoint "startExchange"  ExchangeDataType .\/
   Endpoint "removeExchange" CustomDatumType .\/
   Endpoint "useExchange"    CustomDatumType 
 
@@ -312,11 +328,35 @@ contract = selectList [startExchange,removeExchange, useExchange] >> contract
 
 -- | The start endpoint.
 startExchange :: AsContractError e => Promise () Schema e ()
-startExchange =  endpoint @"startExchange" @CustomDatumType $ \CustomDatumType {} -> do
-  miner <- Plutus.Contract.ownPubKeyHash
-  -- log some stuff
-  logInfo @String "Start a token exchange"
-  logInfo @PubKeyHash miner
+startExchange =  endpoint @"startExchange" @ExchangeDataType $ \ExchangeDataType
+  { edtOldPolicy = edtOldPolicy
+  , edtOldName   = edtOldName
+  , edtNewPolicy = edtNewPolicy
+  , edtNewName   = edtNewName
+  , edtMultiply  = edtMultiply
+  , edtNewTotal  = edtNewTotal
+  } -> do
+    miner <- Plutus.Contract.ownPubKeyHash
+    -- log some stuff
+    logInfo @String "Start a token exchange"
+    logInfo @PubKeyHash miner
+    let inst  = typedValidator $ ContractParams {}
+        exchangeState = Ada.lovelaceValueOf 2000000 <> Value.singleton edtNewPolicy edtNewName edtNewTotal
+        datum = CustomDatumType { cdtOldPolicy = edtOldPolicy
+                                , cdtOldName   = edtOldName
+                                , cdtNewPolicy = edtNewPolicy
+                                , cdtNewName   = edtNewName
+                                , cdtIssuerPKH = miner
+                                , cdtMultiply  = edtMultiply
+                                }
+        constraint = Constraints.mustPayToTheScript datum exchangeState
+    logInfo @Value exchangeState
+    -- submit
+    logInfo @String "submitting"
+    ledgerTx <- submitTxConstraints inst constraint
+    logInfo @String "awaiting"
+    _        <- awaitTxConfirmed $ Ledger.getCardanoTxId ledgerTx
+    logInfo @String "The exchange has been started."
 
 -- | The start endpoint.
 removeExchange :: AsContractError e => Promise () Schema e ()
@@ -356,13 +396,13 @@ createTheExchange = Trace.runEmulatorTraceIO createTheExchange'
   where 
     createTheExchange' = do
       hdl1 <- Trace.activateContractWallet (W.toMockWallet issuer) (contract @ContractError)
-      let datum = CustomDatumType { cdtOldPolicy = ""
-                                  , cdtOldName   = ""
-                                  , cdtNewPolicy = ""
-                                  , cdtNewName   = ""
-                                  , cdtIssuerPKH = iPkh
-                                  , cdtMultiply  = 1
-                                  }
+      let datum = ExchangeDataType { edtOldPolicy = "bc"
+                                   , edtOldName   = "02"
+                                   , edtNewPolicy = "af"
+                                   , edtNewName   = "01"
+                                   , edtMultiply  = 1
+                                   , edtNewTotal  = 100
+                                   }
       Trace.callEndpoint @"startExchange" hdl1 datum
       void $ Trace.waitNSlots 1
 
