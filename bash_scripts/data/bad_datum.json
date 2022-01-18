@@ -1,0 +1,23 @@
+{
+  "constructor": 0,
+  "fields": [
+    {
+      "bytes":"48664e8d76f2b15606677bd117a3eac9929c378ac547ed295518dfd5"
+    },
+    {
+      "bytes":"74426967546f6b656e4e616d653032"
+    },
+    {
+      "bytes":"16af70780a170994e8e5e575f4401b1d89bddf7d1a11d6264e0b0c85"
+    },
+    {
+      "bytes":"74426967546f6b656e4e616d653132"
+    },
+    {
+      "bytes":"a2108b7b1704f9fe12c906096ea1634df8e089c9ccfd651abae4a439"
+    },
+    {
+      "int":4
+    }
+  ]
+}

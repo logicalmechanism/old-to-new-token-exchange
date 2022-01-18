@@ -16,7 +16,7 @@ policy_id_new="16af70780a170994e8e5e575f4401b1d89bddf7d1a11d6264e0b0c85"
 token_name_new="tBigTokenName12"
 token_hex_new=$(echo -n ${token_name_new} | xxd -ps)
 
-SC_ASSET="100 ${policy_id_old}.${token_hex_old} + 700 ${policy_id_new}.${token_hex_new}"
+SC_ASSET="50 ${policy_id_old}.${token_hex_old} + 800 ${policy_id_new}.${token_hex_new}"
 
 SC_UTXO_VALUE=$(${cli} transaction calculate-min-required-utxo \
     --protocol-params-file tmp/protocol.json \
@@ -25,7 +25,7 @@ SC_UTXO_VALUE=$(${cli} transaction calculate-min-required-utxo \
 SC_UTXO_VALUE="2000000"
 sc_address_out="$script_address + $SC_UTXO_VALUE + $SC_ASSET"
 
-exchanger_address_out="$exchanger_address + $SC_UTXO_VALUE + 200 ${policy_id_new}.${token_hex_new}"
+exchanger_address_out="$exchanger_address + $SC_UTXO_VALUE + 100 ${policy_id_new}.${token_hex_new} + 50 ${policy_id_old}.${token_hex_old}"
 
 echo "OUTPUT: "${sc_address_out}
 echo "OUTPUT: "${exchanger_address_out}
@@ -47,7 +47,7 @@ alltxin=""
 TXIN=$(jq -r --arg alltxin "" 'keys[] | . + $alltxin + " --tx-in"' tmp/exchanger_utxo.json)
 CTXIN=$(jq -r --arg alltxin "" 'keys[] | . + $alltxin + " --tx-in-collateral"' tmp/exchanger_utxo.json)
 collateral_tx_in=${CTXIN::-19}
-collateral_tx_in="f5ba171826d8bbeb134e3f019cbde0d0f2cc6632b500994b5971a6a57abec240#0"
+collateral_tx_in="3126d4484d0350abaf0c8d914371eb3c820feb213ee8885d72a8c168c2a3bc1d#0"
 # echo $collateral_tx_in
 # exit
 
@@ -85,21 +85,23 @@ FEE=$(${cli} transaction build \
     --tx-out="${exchanger_address_out}" \
     --tx-out="${sc_address_out}" \
     --tx-out-datum-embed-file data/datum.json \
+    --required-signer buyer-wallet/payment.skey \
     --tx-in-script-file ${script_path} \
     --testnet-magic 1097911063)
 
+    # --tx-out-datum-hash-file data/datum.json \
 IFS=':' read -ra VALUE <<< "$FEE"
 IFS=' ' read -ra FEE <<< "${VALUE[1]}"
 FEE=${FEE[1]}
 echo -e "\033[1;32m Fee: \033[0m" $FEE
-# exit
+exit
 echo -e "\033[0;36m Signing \033[0m"
 ${cli} transaction sign \
     --signing-key-file buyer-wallet/payment.skey \
     --tx-body-file tmp/tx.draft \
     --out-file tmp/tx.signed \
     --testnet-magic 1097911063
-# exit
+exit
 echo -e "\033[0;36m Submitting \033[0m"
 ${cli} transaction submit \
     --testnet-magic 1097911063 \

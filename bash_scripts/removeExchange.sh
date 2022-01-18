@@ -12,7 +12,7 @@ policy_id="16af70780a170994e8e5e575f4401b1d89bddf7d1a11d6264e0b0c85"
 token_name="tBigTokenName12"
 token_hex=$(echo -n ${token_name} | xxd -ps)
 
-SC_ASSET="700 16af70780a170994e8e5e575f4401b1d89bddf7d1a11d6264e0b0c85.74426967546f6b656e4e616d653132 + 100 48664e8d76f2b15606677bd117a3eac9929c378ac547ed295518dfd5.74426967546f6b656e4e616d653032"
+SC_ASSET="900 16af70780a170994e8e5e575f4401b1d89bddf7d1a11d6264e0b0c85.74426967546f6b656e4e616d653132"
 
 SC_UTXO_VALUE=$(${cli} transaction calculate-min-required-utxo \
     --protocol-params-file tmp/protocol.json \
@@ -68,7 +68,7 @@ FEE=$(${cli} transaction build \
     --tx-in-collateral ${collateral_tx_in} \
     --tx-in ${script_tx_in}  \
     --tx-in-datum-file data/datum.json \
-    --tx-in-redeemer-file data/redeemer.json \
+    --tx-in-redeemer-file data/remove_redeemer.json \
     --tx-out="${issuer_address_out}" \
     --required-signer seller-wallet/payment.skey \
     --tx-in-script-file ${script_path} \

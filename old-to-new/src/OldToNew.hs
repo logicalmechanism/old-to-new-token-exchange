@@ -43,7 +43,6 @@ import           Control.Monad             ( void )
 
 import qualified Data.ByteString.Lazy      as LBS
 import qualified Data.ByteString.Short     as SBS
-import qualified Data.Maybe
 
 import           Prelude                   (String)
 
@@ -57,7 +56,6 @@ import           Wallet.Emulator.Wallet    as W
 
 import qualified PlutusTx
 import           PlutusTx.Prelude
--- import           PlutusTx.Builtins         as Bi
 import qualified PlutusTx.Builtins.Internal as Internal
 import           Plutus.Contract
 import qualified Plutus.Trace.Emulator     as Trace
@@ -103,6 +101,15 @@ data CustomDatumType = CustomDatumType
 PlutusTx.unstableMakeIsData ''CustomDatumType
 PlutusTx.makeLift ''CustomDatumType
 
+instance Eq CustomDatumType where
+  {-# INLINABLE (==) #-}
+  a == b = ( cdtOldPolicy a == cdtOldPolicy b) &&
+           ( cdtOldName   a == cdtOldName   b) &&
+           ( cdtNewPolicy a == cdtNewPolicy b) &&
+           ( cdtNewName   a == cdtNewName   b) &&
+           ( cdtIssuerPKH a == cdtIssuerPKH b) &&
+           ( cdtMultiply  a == cdtMultiply  b)
+
 -------------------------------------------------------------------------------
 -- | Create the redeemer parameters data object.
 -------------------------------------------------------------------------------
@@ -134,7 +141,7 @@ mkValidator _ datum redeemer context
       checkActionFlag
         | actionFlag == 0 = exchange
         | actionFlag == 1 = remove
-        | otherwise       = traceIfFalse "Incorrect Action Flag" False
+        | otherwise       = traceIfFalse "Incorrect Action Flag" False -- This can be used as a bypass
           where
             actionFlag :: Integer
             actionFlag = crtAction redeemer
@@ -142,18 +149,20 @@ mkValidator _ datum redeemer context
       -- | Put all the exchange functions together here
       exchange :: Bool
       exchange = do
-        { let a = traceIfFalse "Embedded Datum Is Incorrect"         checkDatumForStateChange
-        ; let b = traceIfFalse "Incorrect Value Returning To Script" $ checkContTxOutForValue scriptTxOutputs contValue
-        ;         traceIfFalse "The Exchange Endpoint Has Failed"    $ all (==True) [a,b]
+        { let a = traceIfFalse "Embedded Datum Is Incorrect"         $ embeddedDatum $ getContinuingOutputs context
+        ; let b = traceIfFalse "Incorrect Value Returning To Script" $ checkContTxOutForValue (getContinuingOutputs context) contValue
+        ; let c = traceIfFalse "Incorrect Tx Signer"                 $ txSignedBy info exchangerPKH
+        ; let d = traceIfFalse "Spending Multiple Script UTxOs"      $ loopInputs (txInfoInputs info) 0
+        ;         traceIfFalse "The Exchange Endpoint Has Failed"    $ all (==True) [a,b,c,d]
         }
 
       -- | Put all the remove functions together here
       remove :: Bool
       remove = do
-        { let a = traceIfFalse "Incorrect Tx Signer"            $ txSignedBy info issuerPKH
-        ; let b = traceIfFalse "Value Not Returning To Issuer"  $ Value.geq (valuePaidTo info issuerPKH) validatedValue
-        ; let c = traceIfFalse "Spending Multiple Script UTxOs" oneScriptInput
-        ;         traceIfFalse "The Remove Endpoint Has Failed" $ all (==True) [a,b,c]
+        { let a = traceIfFalse "Incorrect Tx Signer"                 $ txSignedBy info issuerPKH
+        ; let b = traceIfFalse "Incorrect Value Returning To Issuer" $ checkTxOutForValueAtPKH (txInfoOutputs info) issuerPKH validatedValue
+        ; let c = traceIfFalse "Spending Multiple Script UTxOs"      $ loopInputs (txInfoInputs info) 0
+        ;         traceIfFalse "The Remove Endpoint Has Failed"      $ all (==True) [a,b,c]
         }
 
       -------------------------------------------------------------------------
@@ -163,18 +172,17 @@ mkValidator _ datum redeemer context
       info :: TxInfo
       info = scriptContextTxInfo context
 
-      -- All the outputs going back to the script.
-      scriptTxOutputs  :: [TxOut]
-      scriptTxOutputs  = getContinuingOutputs context
-
-      -- Find the new datum or return the old datum
-      embeddedDatum :: [TxOut] -> CustomDatumType
-      embeddedDatum [] = datum
+      -- Check for embedded datum in the txout
+      embeddedDatum :: [TxOut] -> Bool
+      embeddedDatum [] = False
       embeddedDatum (x:xs) = case txOutDatumHash x of
         Nothing -> embeddedDatum xs
         Just dh -> case findDatum dh info of
-          Nothing         -> datum
-          Just (Datum d)  -> Data.Maybe.fromMaybe datum (PlutusTx.fromBuiltinData d)
+          Nothing         -> False
+          Just (Datum d)  -> case PlutusTx.fromBuiltinData d of
+            Nothing       -> False
+            Just embedded -> embedded == datum
+        
 
       -------------------------------------------------------------------------
       -- | Different Types of Data Here
@@ -185,19 +193,19 @@ mkValidator _ datum redeemer context
         Nothing    -> traceError "No Input to Validate."  -- This should never be hit.
         Just input -> txOutValue $ txInInfoResolved input
 
-      outboundValue :: Value
-      outboundValue = valuePaidTo info exchangerPKH
-
       contValue :: Value
       contValue = minimumRequiredAda                           <>
                   oldTokenValue (outboundOldAmt + oldValueAmt) <>
                   newTokenValue (newValueAmt - outboundNewAmt)
                     where
-                      outboundOldAmt :: Integer
-                      outboundOldAmt = Internal.divideInteger outboundNewAmt (cdtMultiply datum)
-
+                      outboundValue :: Value
+                      outboundValue = valuePaidTo info exchangerPKH
+                      
                       outboundNewAmt :: Integer
                       outboundNewAmt = Value.valueOf outboundValue (cdtNewPolicy datum) (cdtNewName datum)
+
+                      outboundOldAmt :: Integer
+                      outboundOldAmt = Internal.divideInteger outboundNewAmt (cdtMultiply datum)
 
                       oldValueAmt :: Integer
                       oldValueAmt = Value.valueOf validatedValue (cdtOldPolicy datum) (cdtOldName datum)
@@ -210,7 +218,7 @@ mkValidator _ datum redeemer context
 
                       newTokenValue :: Integer -> Value
                       newTokenValue amt = Value.singleton (cdtNewPolicy datum) (cdtNewName datum) amt
-                      
+
                       minimumRequiredAda :: Value
                       minimumRequiredAda = Ada.lovelaceValueOf $ Value.valueOf validatedValue Ada.adaSymbol Ada.adaToken
 
@@ -228,38 +236,37 @@ mkValidator _ datum redeemer context
       checkContTxOutForValue :: [TxOut] -> Value -> Bool
       checkContTxOutForValue [] _val = False
       checkContTxOutForValue (x:xs) val
-        | Value.geq (txOutValue x) val = True
-        | otherwise                    = checkContTxOutForValue xs val
-
-
-      -- There is probably a better way to do this.
-      checkDatumForStateChange :: Bool
-      checkDatumForStateChange = do
-        { let cdt = embeddedDatum scriptTxOutputs
-        ; let a = traceIfFalse "Issuer PKH Can Not Change"      $ cdtIssuerPKH cdt == cdtIssuerPKH datum
-        ; let b = traceIfFalse "Old Policy ID Can Not Change"   $ cdtOldPolicy cdt == cdtOldPolicy datum
-        ; let c = traceIfFalse "Old Token Name Can Not Change"  $ cdtOldName   cdt == cdtOldName   datum
-        ; let d = traceIfFalse "New Policy ID Can Not Change"   $ cdtNewPolicy cdt == cdtNewPolicy datum
-        ; let e = traceIfFalse "New Token Name Can Not Change"  $ cdtNewName   cdt == cdtNewName   datum
-        ; let f = traceIfFalse "Multiplier Can Not Change"      $ cdtMultiply  cdt == cdtMultiply  datum
-        ; all (==True) [a,b,c,d,e,f]
-        }
-
-      -- Force a single utxo has a datum hash in the inputs by checking the length of the inputs that have a datum hash.
-      oneScriptInput :: Bool
-      oneScriptInput = traceIfFalse "More Than One Script Input Is Being Validated." $ loopInputs (txInfoInputs info) 0
+        | checkVal  = True
+        | otherwise = checkContTxOutForValue xs val
         where
-          loopInputs :: [TxInInfo] -> Integer -> Bool
-          loopInputs []     !counter = counter == 1
-          loopInputs (x:xs) !counter = case txOutDatumHash $ txInInfoResolved x of
-              Nothing -> do
-                if counter > 1
-                  then loopInputs [] counter
-                  else loopInputs xs counter
-              Just _  -> do
-                if counter > 1
-                  then loopInputs [] counter
-                  else loopInputs xs (counter + 1)
+          checkVal :: Bool
+          checkVal = txOutValue x == val
+
+      -- Search each TxOut for the correct address and value.
+      checkTxOutForValueAtPKH :: [TxOut] -> PubKeyHash -> Value -> Bool
+      checkTxOutForValueAtPKH [] _pkh _val = False
+      checkTxOutForValueAtPKH (x:xs) pkh val
+        | checkAddr && checkVal = True
+        | otherwise             = checkTxOutForValueAtPKH xs pkh val
+        where
+          checkAddr :: Bool
+          checkAddr = txOutAddress x == pubKeyHashAddress pkh
+
+          checkVal :: Bool
+          checkVal = txOutValue x == val
+      
+      -- Force a single utxo has a datum hash in the inputs by checking the length of the inputs that have a datum hash.
+      loopInputs :: [TxInInfo] -> Integer -> Bool
+      loopInputs []     !counter = counter == 1
+      loopInputs (x:xs) !counter = case txOutDatumHash $ txInInfoResolved x of
+          Nothing -> do
+            if counter > 1
+              then loopInputs [] counter -- quick end
+              else loopInputs xs counter
+          Just _  -> do
+            if counter > 1
+              then loopInputs [] counter -- quick end
+              else loopInputs xs (counter + 1)
 
 
 -------------------------------------------------------------------------------
@@ -302,7 +309,7 @@ oldToNewScript = PlutusScriptSerialised oldToNewScriptShortBs
 -- | Off Chain
 -------------------------------------------------------------------------------
 -- The value being sold must be passed into the off chain data object.
-data ExchangeDataType = ExchangeDataType 
+data ExchangeDataType = ExchangeDataType
   { edtOldPolicy :: !CurrencySymbol
   -- ^ The Old Policy ID
   , edtOldName   :: !TokenName
@@ -321,7 +328,7 @@ data ExchangeDataType = ExchangeDataType
 type Schema =
   Endpoint "startExchange"  ExchangeDataType .\/
   Endpoint "removeExchange" CustomDatumType .\/
-  Endpoint "useExchange"    CustomDatumType 
+  Endpoint "useExchange"    CustomDatumType
 
 contract :: AsContractError e => Contract () Schema e ()
 contract = selectList [startExchange,removeExchange, useExchange] >> contract
@@ -374,6 +381,8 @@ useExchange =  endpoint @"useExchange" @CustomDatumType $ \CustomDatumType {} ->
   logInfo @String "Use a token exchange"
   logInfo @PubKeyHash miner
 
+
+
 -------------------------------------------------------------------------------
 -- | TRACES
 -------------------------------------------------------------------------------
@@ -393,7 +402,7 @@ ePkh = CW.pubKeyHash exchanger
 -- IO calls for the repl
 createTheExchange :: IO ()
 createTheExchange = Trace.runEmulatorTraceIO createTheExchange'
-  where 
+  where
     createTheExchange' = do
       hdl1 <- Trace.activateContractWallet (W.toMockWallet issuer) (contract @ContractError)
       let datum = ExchangeDataType { edtOldPolicy = "bc"
@@ -408,7 +417,7 @@ createTheExchange = Trace.runEmulatorTraceIO createTheExchange'
 
 removeFromExchange :: IO ()
 removeFromExchange = Trace.runEmulatorTraceIO createTheExchange'
-  where 
+  where
     createTheExchange' = do
       hdl1 <- Trace.activateContractWallet (W.toMockWallet issuer) (contract @ContractError)
       let datum = CustomDatumType { cdtOldPolicy = ""
@@ -423,7 +432,7 @@ removeFromExchange = Trace.runEmulatorTraceIO createTheExchange'
 
 useTheExchange :: IO ()
 useTheExchange = Trace.runEmulatorTraceIO createTheExchange'
-  where 
+  where
     createTheExchange' = do
       hdl1 <- Trace.activateContractWallet (W.toMockWallet issuer) (contract @ContractError)
       let datum = CustomDatumType { cdtOldPolicy = ""
