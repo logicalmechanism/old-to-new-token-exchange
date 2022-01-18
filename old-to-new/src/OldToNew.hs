@@ -131,7 +131,7 @@ mkValidator _ datum redeemer context
       checkActionFlag
         | actionFlag == 0 = exchange
         | actionFlag == 1 = remove
-        | otherwise       = traceIfFalse "Incorrect Action Flag" False
+        | otherwise       = traceIfFalse "Incorrect Action Flag" True
           where
             actionFlag :: Integer
             actionFlag = crtAction redeemer
