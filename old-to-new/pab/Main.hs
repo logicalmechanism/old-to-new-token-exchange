@@ -27,8 +27,8 @@ import           Plutus.PAB.Simulator                (SimulatorEffectHandlers)
 import qualified Plutus.PAB.Simulator                as Simulator
 import qualified Plutus.PAB.Webserver.Server         as PAB.Server
 import           OldToNew
-import           Plutus.Trace.Emulator.Extract       (writeScriptsTo, ScriptsConfig (..), Command (..))
-import           Ledger.Index                        (ValidatorMode(..))
+-- import           Plutus.Trace.Emulator.Extract       (writeScriptsTo, ScriptsConfig (..), Command (..))
+-- import           Ledger.Index                        (ValidatorMode(..))
 
 main :: IO ()
 main = void $ Simulator.runSimulationWith handlers $ do

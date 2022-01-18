@@ -29,6 +29,9 @@
 module OldToNew
   ( oldToNewScript
   , oldToNewScriptShortBs
+  , createTheExchange
+  , removeFromExchange
+  , useTheExchange
   , Schema
   , contract
   , CustomDatumType(..)
@@ -42,10 +45,10 @@ import qualified Data.ByteString.Lazy      as LBS
 import qualified Data.ByteString.Short     as SBS
 import qualified Data.Maybe
 
-import           Prelude                   (String, (^))
+import           Prelude                   (String)
 
 import           Ledger                    hiding ( singleton )
-import qualified Ledger.Constraints        as Constraints
+-- import qualified Ledger.Constraints        as Constraints
 import qualified Ledger.Typed.Scripts      as Scripts
 import qualified Ledger.CardanoWallet      as CW
 import           Playground.Contract
@@ -54,7 +57,7 @@ import           Wallet.Emulator.Wallet    as W
 
 import qualified PlutusTx
 import           PlutusTx.Prelude
-import           PlutusTx.Builtins         as Bi
+-- import           PlutusTx.Builtins         as Bi
 import qualified PlutusTx.Builtins.Internal as Internal
 import           Plutus.Contract
 import qualified Plutus.Trace.Emulator     as Trace
@@ -131,7 +134,7 @@ mkValidator _ datum redeemer context
       checkActionFlag
         | actionFlag == 0 = exchange
         | actionFlag == 1 = remove
-        | otherwise       = traceIfFalse "Incorrect Action Flag" True
+        | otherwise       = traceIfFalse "Incorrect Action Flag" False
           where
             actionFlag :: Integer
             actionFlag = crtAction redeemer
@@ -184,8 +187,6 @@ mkValidator _ datum redeemer context
 
       outboundValue :: Value
       outboundValue = valuePaidTo info exchangerPKH
-
-      -- Internal.divideInteger amt 40
 
       contValue :: Value
       contValue = minimumRequiredAda                           <>
@@ -240,7 +241,8 @@ mkValidator _ datum redeemer context
         ; let c = traceIfFalse "Old Token Name Can Not Change"  $ cdtOldName   cdt == cdtOldName   datum
         ; let d = traceIfFalse "New Policy ID Can Not Change"   $ cdtNewPolicy cdt == cdtNewPolicy datum
         ; let e = traceIfFalse "New Token Name Can Not Change"  $ cdtNewName   cdt == cdtNewName   datum
-        ; all (==True) [a,b,c,d,e]
+        ; let f = traceIfFalse "Multiplier Can Not Change"      $ cdtMultiply  cdt == cdtMultiply  datum
+        ; all (==True) [a,b,c,d,e,f]
         }
 
       -- Force a single utxo has a datum hash in the inputs by checking the length of the inputs that have a datum hash.
@@ -301,7 +303,95 @@ oldToNewScript = PlutusScriptSerialised oldToNewScriptShortBs
 -------------------------------------------------------------------------------
 
 type Schema =
-  Endpoint "endpoint"  CustomDatumType
+  Endpoint "startExchange"  CustomDatumType .\/
+  Endpoint "removeExchange" CustomDatumType .\/
+  Endpoint "useExchange"    CustomDatumType 
 
 contract :: AsContractError e => Contract () Schema e ()
-contract = selectList [] >> contract
+contract = selectList [startExchange,removeExchange, useExchange] >> contract
+
+-- | The start endpoint.
+startExchange :: AsContractError e => Promise () Schema e ()
+startExchange =  endpoint @"startExchange" @CustomDatumType $ \CustomDatumType {} -> do
+  miner <- Plutus.Contract.ownPubKeyHash
+  -- log some stuff
+  logInfo @String "Start a token exchange"
+  logInfo @PubKeyHash miner
+
+-- | The start endpoint.
+removeExchange :: AsContractError e => Promise () Schema e ()
+removeExchange =  endpoint @"removeExchange" @CustomDatumType $ \CustomDatumType {} -> do
+  miner <- Plutus.Contract.ownPubKeyHash
+  -- log some stuff
+  logInfo @String "Remove a token exchange"
+  logInfo @PubKeyHash miner
+
+-- | The start endpoint.
+useExchange :: AsContractError e => Promise () Schema e ()
+useExchange =  endpoint @"useExchange" @CustomDatumType $ \CustomDatumType {} -> do
+  miner <- Plutus.Contract.ownPubKeyHash
+  -- log some stuff
+  logInfo @String "Use a token exchange"
+  logInfo @PubKeyHash miner
+
+-------------------------------------------------------------------------------
+-- | TRACES
+-------------------------------------------------------------------------------
+
+issuer :: CW.MockWallet
+issuer = CW.knownWallet 1
+
+exchanger :: CW.MockWallet
+exchanger = CW.knownWallet 2
+
+iPkh :: PubKeyHash
+iPkh = CW.pubKeyHash issuer
+
+ePkh :: PubKeyHash
+ePkh = CW.pubKeyHash exchanger
+
+-- IO calls for the repl
+createTheExchange :: IO ()
+createTheExchange = Trace.runEmulatorTraceIO createTheExchange'
+  where 
+    createTheExchange' = do
+      hdl1 <- Trace.activateContractWallet (W.toMockWallet issuer) (contract @ContractError)
+      let datum = CustomDatumType { cdtOldPolicy = ""
+                                  , cdtOldName   = ""
+                                  , cdtNewPolicy = ""
+                                  , cdtNewName   = ""
+                                  , cdtIssuerPKH = iPkh
+                                  , cdtMultiply  = 1
+                                  }
+      Trace.callEndpoint @"startExchange" hdl1 datum
+      void $ Trace.waitNSlots 1
+
+removeFromExchange :: IO ()
+removeFromExchange = Trace.runEmulatorTraceIO createTheExchange'
+  where 
+    createTheExchange' = do
+      hdl1 <- Trace.activateContractWallet (W.toMockWallet issuer) (contract @ContractError)
+      let datum = CustomDatumType { cdtOldPolicy = ""
+                                  , cdtOldName   = ""
+                                  , cdtNewPolicy = ""
+                                  , cdtNewName   = ""
+                                  , cdtIssuerPKH = iPkh
+                                  , cdtMultiply  = 1
+                                  }
+      Trace.callEndpoint @"removeExchange" hdl1 datum
+      void $ Trace.waitNSlots 1
+
+useTheExchange :: IO ()
+useTheExchange = Trace.runEmulatorTraceIO createTheExchange'
+  where 
+    createTheExchange' = do
+      hdl1 <- Trace.activateContractWallet (W.toMockWallet issuer) (contract @ContractError)
+      let datum = CustomDatumType { cdtOldPolicy = ""
+                                  , cdtOldName   = ""
+                                  , cdtNewPolicy = ""
+                                  , cdtNewName   = ""
+                                  , cdtIssuerPKH = iPkh
+                                  , cdtMultiply  = 1
+                                  }
+      Trace.callEndpoint @"useExchange" hdl1 datum
+      void $ Trace.waitNSlots 1

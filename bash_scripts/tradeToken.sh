@@ -11,7 +11,7 @@ receiver_address=$(cat buyer-wallet/payment.addr)
 # receiver_address="addr_test1qrxw9ynp9rva8uztyqjgefl8d3k804pwapms4wv3e60ltjn2s7gj5l4pam3pdeckkp7jwx8dsxelvq3ypv2ggzet9wcsq68qvx"
 
 # Define Asset to be printed here
-asset="1 7470b5d94b828481469f1c1a15edbcc5d23e0326fe60892fcf8dcdeb.455247"
+asset="100 48664e8d76f2b15606677bd117a3eac9929c378ac547ed295518dfd5.74426967546f6b656e4e616d653032"
 
 min_utxo=$(${cli} transaction calculate-min-required-utxo \
     --protocol-params-file tmp/protocol.json \
@@ -42,6 +42,7 @@ FEE=$(${cli} transaction build \
     --out-file tmp/tx.draft \
     --change-address ${sender_address} \
     --tx-in ${HEXTXIN} \
+    --tx-out="${sender_address} + 2000000 + 900 16af70780a170994e8e5e575f4401b1d89bddf7d1a11d6264e0b0c85.74426967546f6b656e4e616d653132" \
     --tx-out="${token_to_be_traded}" \
     --testnet-magic 1097911063)
 
@@ -49,7 +50,7 @@ IFS=':' read -ra VALUE <<< "$FEE"
 IFS=' ' read -ra FEE <<< "${VALUE[1]}"
 FEE=${FEE[1]}
 echo -e "\033[1;32m Fee: \033[0m" $FEE
-
+# exit
 echo -e "\033[0;36m Signing \033[0m"
 ${cli} transaction sign \
     --signing-key-file seller-wallet/payment.skey \

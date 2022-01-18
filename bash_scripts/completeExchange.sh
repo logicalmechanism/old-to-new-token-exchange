@@ -16,7 +16,7 @@ policy_id_new="16af70780a170994e8e5e575f4401b1d89bddf7d1a11d6264e0b0c85"
 token_name_new="tBigTokenName12"
 token_hex_new=$(echo -n ${token_name_new} | xxd -ps)
 
-SC_ASSET="100 ${policy_id_old}.${token_hex_old} + 900 ${policy_id_new}.${token_hex_new}"
+SC_ASSET="100 ${policy_id_old}.${token_hex_old} + 700 ${policy_id_new}.${token_hex_new}"
 
 SC_UTXO_VALUE=$(${cli} transaction calculate-min-required-utxo \
     --protocol-params-file tmp/protocol.json \
@@ -25,7 +25,7 @@ SC_UTXO_VALUE=$(${cli} transaction calculate-min-required-utxo \
 SC_UTXO_VALUE="2000000"
 sc_address_out="$script_address + $SC_UTXO_VALUE + $SC_ASSET"
 
-exchanger_address_out="$exchanger_address + $SC_UTXO_VALUE + 100 ${policy_id_new}.${token_hex_new}"
+exchanger_address_out="$exchanger_address + $SC_UTXO_VALUE + 200 ${policy_id_new}.${token_hex_new}"
 
 echo "OUTPUT: "${sc_address_out}
 echo "OUTPUT: "${exchanger_address_out}
@@ -47,7 +47,7 @@ alltxin=""
 TXIN=$(jq -r --arg alltxin "" 'keys[] | . + $alltxin + " --tx-in"' tmp/exchanger_utxo.json)
 CTXIN=$(jq -r --arg alltxin "" 'keys[] | . + $alltxin + " --tx-in-collateral"' tmp/exchanger_utxo.json)
 collateral_tx_in=${CTXIN::-19}
-collateral_tx_in="e9f202b15beb21a99769e43af972ce732e1daaca37bb3db101cb8092e249c392#1"
+collateral_tx_in="f5ba171826d8bbeb134e3f019cbde0d0f2cc6632b500994b5971a6a57abec240#0"
 # echo $collateral_tx_in
 # exit
 
