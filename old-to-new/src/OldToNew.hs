@@ -39,10 +39,12 @@ module OldToNew
 import           Cardano.Api.Shelley       (PlutusScript (..), PlutusScriptV1)
 
 import           Codec.Serialise           ( serialise )
-import           Control.Monad             ( void )
+import           Control.Monad ( void, forM_, when )
+-- import           Control.Monad.Freer.Error ( throwError )
 
 import qualified Data.ByteString.Lazy      as LBS
 import qualified Data.ByteString.Short     as SBS
+import qualified Data.Maybe
 
 import           Prelude                   (String)
 
@@ -56,6 +58,7 @@ import           Wallet.Emulator.Wallet    as W
 
 import qualified PlutusTx
 import           PlutusTx.Prelude
+import           PlutusTx.Builtins         as Bi
 import qualified PlutusTx.Builtins.Internal as Internal
 import           Plutus.Contract
 import qualified Plutus.Trace.Emulator     as Trace
@@ -63,6 +66,10 @@ import qualified Plutus.V1.Ledger.Ada      as Ada
 import qualified Plutus.V1.Ledger.Scripts  as Plutus
 import qualified Plutus.V1.Ledger.Value    as Value
 
+import Plutus.Contracts.Currency qualified as Currency
+import Data.Semigroup qualified as Semigroup
+import Data.Void (Void)
+import Plutus.Trace.Emulator qualified as Emulator
 {- |
   Author   : The Ancient Kraken
   Copyright: 2021
@@ -101,7 +108,7 @@ data CustomDatumType = CustomDatumType
 PlutusTx.unstableMakeIsData ''CustomDatumType
 PlutusTx.makeLift ''CustomDatumType
 
-instance Eq CustomDatumType where
+instance PlutusTx.Prelude.Eq CustomDatumType where
   {-# INLINABLE (==) #-}
   a == b = ( cdtOldPolicy a == cdtOldPolicy b) &&
            ( cdtOldName   a == cdtOldName   b) &&
@@ -333,6 +340,17 @@ type Schema =
 contract :: AsContractError e => Contract () Schema e ()
 contract = selectList [startExchange,removeExchange, useExchange] >> contract
 
+-- | Create some sample tokens
+setupTokens :: Contract (Maybe (Semigroup.Last Currency.OneShotCurrency)) Currency.CurrencySchema Currency.CurrencyError ()
+setupTokens = do
+    ownPK <- Plutus.Contract.ownPubKeyHash
+    cur   <- Currency.mintContract ownPK [(tn, 1000) | tn <- tokenNames]
+    logInfo @String "SetUp"
+
+tokenNames :: [TokenName]
+tokenNames = ["A"]
+
+
 -- | The start endpoint.
 startExchange :: AsContractError e => Promise () Schema e ()
 startExchange =  endpoint @"startExchange" @ExchangeDataType $ \ExchangeDataType
@@ -344,7 +362,6 @@ startExchange =  endpoint @"startExchange" @ExchangeDataType $ \ExchangeDataType
   , edtNewTotal  = edtNewTotal
   } -> do
     miner <- Plutus.Contract.ownPubKeyHash
-    -- log some stuff
     logInfo @String "Start a token exchange"
     logInfo @PubKeyHash miner
     let inst  = typedValidator $ ContractParams {}
@@ -357,12 +374,13 @@ startExchange =  endpoint @"startExchange" @ExchangeDataType $ \ExchangeDataType
                                 , cdtMultiply  = edtMultiply
                                 }
         constraint = Constraints.mustPayToTheScript datum exchangeState
+    logInfo @String "Value"
     logInfo @Value exchangeState
     -- submit
     logInfo @String "submitting"
     ledgerTx <- submitTxConstraints inst constraint
     logInfo @String "awaiting"
-    _        <- awaitTxConfirmed $ Ledger.getCardanoTxId ledgerTx
+    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
     logInfo @String "The exchange has been started."
 
 -- | The start endpoint.
@@ -404,17 +422,32 @@ createTheExchange :: IO ()
 createTheExchange = Trace.runEmulatorTraceIO createTheExchange'
   where
     createTheExchange' = do
+      -- issuer holds the new tokens
+      _ <- Emulator.activateContract (W.toMockWallet issuer) setupTokens "init"
+      void $ Trace.waitNSlots 1
+      
+      -- exchanger holds the old tokens
+      _ <- Emulator.activateContract (W.toMockWallet exchanger) setupTokens "init"
+      void $ Trace.waitNSlots 1
+      
+      -- create the exchange
       hdl1 <- Trace.activateContractWallet (W.toMockWallet issuer) (contract @ContractError)
-      let datum = ExchangeDataType { edtOldPolicy = "bc"
-                                   , edtOldName   = "02"
-                                   , edtNewPolicy = "af"
-                                   , edtNewName   = "01"
+      void $ Trace.waitNSlots 1
+      
+      -- get values from minting
+      
+      -- create datum
+      let datum = ExchangeDataType { edtOldPolicy = ""
+                                   , edtOldName   = ""
+                                   , edtNewPolicy = ""
+                                   , edtNewName   = ""
                                    , edtMultiply  = 1
-                                   , edtNewTotal  = 100
+                                   , edtNewTotal  = 1000
                                    }
       Trace.callEndpoint @"startExchange" hdl1 datum
       void $ Trace.waitNSlots 1
 
+-- | Testing removal
 removeFromExchange :: IO ()
 removeFromExchange = Trace.runEmulatorTraceIO createTheExchange'
   where

@@ -62,6 +62,7 @@ library
                       , plutus-ledger-api
                       , plutus-tx
                       , plutus-tx-plugin
+                      , plutus-use-cases
                       , playground-common
                       , plutus-contract
                       , serialise
